@@ -5,6 +5,7 @@ import argparse
 from datetime import datetime, timedelta
 import requests
 from pathlib import Path
+from transformers import pipeline
 
 
 def load_team_members(filepath: str = "team.txt") -> list[str]:
@@ -18,10 +19,33 @@ def load_team_members(filepath: str = "team.txt") -> list[str]:
         sys.exit(1)
 
 
+def classify_security_fix(title: str, body: str | None, classifier) -> str:
+    """Classify PR as security fix or not using zero-shot classification."""
+    combined_text = f"{title}. {body or ''}"
+
+    # Strip HTML comments
+    import re
+
+    combined_text = re.sub(r"<!--.*?-->", "", combined_text, flags=re.DOTALL)
+
+    # Truncate to avoid token limit issues
+    if len(combined_text) > 512:
+        combined_text = combined_text[:512]
+
+    result = classifier(
+        combined_text,
+        candidate_labels=["security fix", "cve patch", "other"],
+        # multi_class=False
+    )
+
+    return result["labels"][0]
+
+
 def collect_prs(
     members: list[str],
     start_date: datetime,
     end_date: datetime,
+    classifier,
     token: str | None = None,
 ) -> list[dict]:
     """
@@ -63,6 +87,9 @@ def collect_prs(
 
             data = response.json()
             for pr in data.get("items", []):
+                classification = classify_security_fix(
+                    pr["title"], pr["body"], classifier
+                )
                 all_prs.append(
                     {
                         "author": member,
@@ -72,6 +99,7 @@ def collect_prs(
                         "repository": pr["repository_url"].split("/")[-1],
                         "created_at": pr["created_at"],
                         "state": pr["state"],
+                        "security_classification": classification,
                     }
                 )
         except requests.exceptions.RequestException as e:
@@ -97,6 +125,11 @@ def main():
 
     args = parser.parse_args()
 
+    # Initialize zero-shot classifier
+    print("Loading zero-shot classification model...")
+    classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+    print("Model loaded!\n")
+
     # Example: Last N days
     end_date = datetime.now()
     start_date = end_date - timedelta(days=30)
@@ -107,10 +140,10 @@ def main():
     members = load_team_members(args.team_file)
     print(f"Found {len(members)} team members\n")
 
-    prs = collect_prs(members, start_date, end_date)
+    prs = collect_prs(members, start_date, end_date, classifier)
 
     print(f"\nFound {len(prs)} PRs\n")
-    
+
     if args.output:
         with open(args.output, "w") as f:
             json.dump(prs, f, indent=2)
