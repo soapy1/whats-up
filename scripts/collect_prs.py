@@ -8,6 +8,14 @@ from pathlib import Path
 from transformers import pipeline
 
 
+SECURITY_RELATED_CLASSIFICATIONS = [
+    "security fix",
+    "cve patch",
+    "vulnerability fix",
+    "exploit mitigation",
+    "security enhancement",
+]
+
 def load_team_members(filepath: str = "team.txt") -> list[str]:
     """Load GitHub usernames from team.txt file."""
     try:
@@ -34,8 +42,7 @@ def classify_security_fix(title: str, body: str | None, classifier) -> str:
 
     result = classifier(
         combined_text,
-        candidate_labels=["security fix", "cve patch", "other"],
-        # multi_class=False
+        candidate_labels=SECURITY_RELATED_CLASSIFICATIONS + ["other"],
     )
 
     return result["labels"][0]
@@ -99,7 +106,7 @@ def collect_prs(
                         "repository": pr["repository_url"].split("/")[-1],
                         "created_at": pr["created_at"],
                         "state": pr["state"],
-                        "security_classification": classification,
+                        "contribution_classification": classification,
                     }
                 )
         except requests.exceptions.RequestException as e:
@@ -142,12 +149,31 @@ def main():
 
     prs = collect_prs(members, start_date, end_date, classifier)
 
-    print(f"\nFound {len(prs)} PRs\n")
+    security_related_prs = 0
+    summary = {
+        "members": len(members),
+        "total_prs": len(prs),
+    }
+    security_fixes = {classification: 0 for classification in SECURITY_RELATED_CLASSIFICATIONS}
+    
+    for pr in prs:
+        if pr["contribution_classification"] in SECURITY_RELATED_CLASSIFICATIONS:
+            security_related_prs += 1
+            security_fixes[pr["contribution_classification"]] += 1
+            print(f"{pr['title']} ({pr['url']}) - Classified as: {pr['contribution_classification']}")
+
+    print(f"\nFound {security_related_prs} security-related PRs\n")
+    print("\033[1mSummary:\033[0m")
+    print(f"Total team members: {summary['members']}")
+    print(f"Total PRs collected: {summary['total_prs']}")
+    print("Security-related PRs by classification:")
+    for classification, count in security_fixes.items():
+        print(f"  {classification}: {count}")
+
 
     if args.output:
         with open(args.output, "w") as f:
             json.dump(prs, f, indent=2)
-        print(f"Results saved to {args.output}")
 
 
 if __name__ == "__main__":
