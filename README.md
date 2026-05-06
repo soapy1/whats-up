@@ -8,6 +8,8 @@ This project allows you to find all the open source contributions made by a set 
 
 ### Run the scripts
 
+Running the scripts will populate a local file called `prs.json` which will contain data about contributions made by team members.
+
 There are two steps required to see what contributions a team has been up to.
 
 #### 1. populate a team.txt file.
@@ -35,3 +37,16 @@ $ pixi run collect-prs
 This will output a summary of PRs by all the users, including information on how many security and cve related contributions they have made. This will also output the raw data to a file `prs.json`.
 
 This uses [zero-shot classification](https://huggingface.co/docs/inference-providers/tasks/zero-shot-classification) to determine if a pr is a security or cve related fix based on the pr title and description.
+
+### Run the frontend
+
+Once you have run the scripts to create a prs.json, you can also view the data in a more friendly, web-based way.
+
+```
+$ cd whats-up
+$ pixi run -e frontend npm start
+```
+
+---
+
+This project was created with the help of AI coding tools.

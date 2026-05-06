@@ -3,4 +3,4 @@
 !.pixi/config.toml
 
 team.txt
-prs.json
+*prs.json
