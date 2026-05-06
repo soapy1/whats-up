@@ -1,0 +1,12 @@
+[workspace]
+authors = ["sophia <scastellarin@openteams.com>"]
+channels = ["conda-forge"]
+name = "whats-my-team-up-to"
+platforms = ["linux-64", "osx-arm64", "win-64"]
+version = "0.1.0"
+
+[tasks]
+find-my-team = { description = "Populate the team.txt list with github usernames associated with OpenTeams", cmd = ["gh", "api", "--paginate", "/orgs/openteams-ai/members", "--jq", ".[].login", ">", "team.txt"] }
+
+[dependencies]
+gh = ">=2.92.0,<3"

@@ -1,0 +1,36 @@
+version: 6
+environments:
+  default:
+    channels:
+    - url: https://conda.anaconda.org/conda-forge/
+    options:
+      pypi-prerelease-mode: if-necessary-or-explicit
+    packages:
+      linux-64:
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/gh-2.92.0-hfc2019e_0.conda
+      osx-arm64:
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/gh-2.92.0-hf76c51c_0.conda
+      win-64:
+      - conda: https://conda.anaconda.org/conda-forge/win-64/gh-2.92.0-h11686cb_0.conda
+packages:
+- conda: https://conda.anaconda.org/conda-forge/linux-64/gh-2.92.0-hfc2019e_0.conda
+  sha256: 9e24e0f179505780270a19ffc2c6d88c6ee585240434ec6d4c9c84e864fe80d8
+  md5: e784306b1701fe62450d517096312a4e
+  license: Apache-2.0
+  license_family: APACHE
+  size: 13106666
+  timestamp: 1777383228293
+- conda: https://conda.anaconda.org/conda-forge/osx-arm64/gh-2.92.0-hf76c51c_0.conda
+  sha256: f882603448aacafc311e07c63dd15d410d4e62e1ebf3fd6b4e25743d9d3995e6
+  md5: 91fe941e8d5bc719f00ff2fe072afd0d
+  license: Apache-2.0
+  license_family: APACHE
+  size: 11737374
+  timestamp: 1777383259152
+- conda: https://conda.anaconda.org/conda-forge/win-64/gh-2.92.0-h11686cb_0.conda
+  sha256: f704493f01dced8d536aa5a335a79ccef8aa3700c183e7c35d85da9bc2c256c1
+  md5: 4e33e8f0a101e04288a164c5b336551a
+  license: Apache-2.0
+  license_family: APACHE
+  size: 12585395
+  timestamp: 1777383265589
