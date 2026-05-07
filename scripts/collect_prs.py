@@ -1,5 +1,5 @@
 import json
-import os
+import re
 import sys
 import argparse
 from datetime import datetime, timedelta
@@ -8,13 +8,32 @@ from pathlib import Path
 from transformers import pipeline
 
 
+PACKAGING_CLASSIFICATIONS = [
+    "cve patch",
+    "version update",
+    "dependency update",
+    "re-build",
+]
+
 SECURITY_RELATED_CLASSIFICATIONS = [
     "security fix",
     "cve patch",
-    "vulnerability fix",
     "exploit mitigation",
     "security enhancement",
 ]
+
+OTHER_CLASSIFICATIONS = ["other"]
+
+ALL_CLASSIFICATIONS = set(
+    SECURITY_RELATED_CLASSIFICATIONS + PACKAGING_CLASSIFICATIONS + OTHER_CLASSIFICATIONS
+)
+
+REPO_CLASSIFICATION_MAPPING = {
+    "*": SECURITY_RELATED_CLASSIFICATIONS + OTHER_CLASSIFICATIONS,
+    "conda-forge/*": PACKAGING_CLASSIFICATIONS,
+    "conda-forge/staged-recipes": None,
+}
+
 
 def load_team_members(filepath: str = "team.txt") -> list[str]:
     """Load GitHub usernames from team.txt file."""
@@ -27,25 +46,41 @@ def load_team_members(filepath: str = "team.txt") -> list[str]:
         sys.exit(1)
 
 
-def classify_security_fix(title: str, body: str | None, classifier) -> str:
+def classify_security_fix(title: str, body: str | None, repo: str,classifier) -> str:
     """Classify PR as security fix or not using zero-shot classification."""
     combined_text = f"{title}. {body or ''}"
 
     # Strip HTML comments
-    import re
-
     combined_text = re.sub(r"<!--.*?-->", "", combined_text, flags=re.DOTALL)
 
     # Truncate to avoid token limit issues
     if len(combined_text) > 512:
         combined_text = combined_text[:512]
 
-    result = classifier(
-        combined_text,
-        candidate_labels=SECURITY_RELATED_CLASSIFICATIONS + ["other"],
-    )
+    # Determine candidate labels based on repository using REPO_CLASSIFICATION_MAPPING
+    # Sort by key length (descending) to check most specific patterns first
+    candidate_labels = None
+    
+    for pattern in REPO_CLASSIFICATION_MAPPING.keys():
+        if pattern == "*":
+            candidate_labels = REPO_CLASSIFICATION_MAPPING[pattern]
+        elif pattern.endswith("/*"):
+            # Wildcard pattern (e.g., "conda-forge/*")
+            prefix = pattern[:-2]
+            if repo.startswith(prefix):
+                candidate_labels = REPO_CLASSIFICATION_MAPPING[pattern]
+        elif repo == pattern:
+                candidate_labels = REPO_CLASSIFICATION_MAPPING[pattern]
+                break
 
-    return result["labels"][0]
+    if candidate_labels:
+        result = classifier(
+            combined_text,
+            candidate_labels=candidate_labels
+        )
+        return result["labels"][0]
+    else:
+        return "No classification available for this repository"
 
 
 def collect_prs(
@@ -94,8 +129,9 @@ def collect_prs(
 
             data = response.json()
             for pr in data.get("items", []):
+                repository = f"{pr["repository_url"].split("/")[-2]}/{pr["repository_url"].split("/")[-1]}"
                 classification = classify_security_fix(
-                    pr["title"], pr["body"], classifier
+                    pr["title"], pr["body"], repository, classifier
                 )
                 all_prs.append(
                     {
@@ -103,7 +139,7 @@ def collect_prs(
                         "title": pr["title"],
                         "body": pr["body"],
                         "url": pr["html_url"],
-                        "repository": pr["repository_url"].split("/")[-1],
+                        "repository": repository,
                         "created_at": pr["created_at"],
                         "state": pr["state"],
                         "contribution_classification": classification,
@@ -134,12 +170,12 @@ def main():
 
     # Initialize zero-shot classifier
     print("Loading zero-shot classification model...")
-    classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+    classifier = pipeline("zero-shot-classification", model="MoritzLaurer/ModernBERT-large-zeroshot-v2.0")
     print("Model loaded!\n")
 
     # Example: Last N days
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=30)
+    start_date = end_date - timedelta(days=15)
 
     print(f"Collecting PRs from {start_date.date()} to {end_date.date()}")
     print()
