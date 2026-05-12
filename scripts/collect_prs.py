@@ -1,5 +1,5 @@
 import json
-import os
+import re
 import sys
 import argparse
 from datetime import datetime, timedelta
@@ -8,13 +8,31 @@ from pathlib import Path
 from transformers import pipeline
 
 
-SECURITY_RELATED_CLASSIFICATIONS = [
-    "security fix",
-    "cve patch",
-    "vulnerability fix",
-    "exploit mitigation",
-    "security enhancement",
-]
+GITHUB_HEADERS = {
+    "Accept": "application/vnd.github.v3+json",
+}
+
+VULN_ID_RE = re.compile(
+    r"\b(CVE-\d{4}-\d{4,7}|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}|CWE-\d+)\b",
+    re.I,
+)
+
+SECURITY_HINT_RE = re.compile(
+    r"\b("
+    r"security|vulnerability|exploit|xss|csrf|ssrf|rce|injection|"
+    r"path traversal|directory traversal|auth bypass|privilege escalation|"
+    r"deserialization|sandbox escape|secret leak|token leak|sanitize|"
+    r"permission check|access control|cve|ghsa|cwe"
+    r")\b",
+    re.I,
+)
+
+SECURITY_FILE_RE = re.compile(
+    r"(auth|oauth|jwt|session|permission|rbac|acl|crypto|secret|token|"
+    r"password|sanitize|csrf|xss|ssrf|parser|sandbox|policy)",
+    re.I,
+)
+
 
 def load_team_members(filepath: str = "team.txt") -> list[str]:
     """Load GitHub usernames from team.txt file."""
@@ -27,25 +45,95 @@ def load_team_members(filepath: str = "team.txt") -> list[str]:
         sys.exit(1)
 
 
-def classify_security_fix(title: str, body: str | None, classifier) -> str:
+def get_commit_messages(repo_url: str, pr_number: str) -> list[str]:
+    """Fetch all commit messages from a PR."""
+    try:
+        api_url = f"{repo_url}/pulls/{pr_number}/commits"
+        
+        response = requests.get(api_url, headers=GITHUB_HEADERS)
+        response.raise_for_status()
+        
+        commits = response.json()
+        messages = [commit.get("commit", {}).get("message", "") for commit in commits]
+        return messages
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching commits for {repo_url}/pulls/{pr_number}: {e}")
+        return []
+
+
+def build_text(pr: dict) -> str:
+    return f"""
+PR_TITLE: {pr.get("title", "")}
+
+PR_BODY:
+{pr.get("body", "")}
+
+PR_LABELS:
+{" ".join([label.get("name", "") for label in pr.get("labels", [])])}
+
+COMMIT_MESSAGES:
+{" ".join(get_commit_messages(pr["repository_url"], pr["number"]))}
+""".strip()
+
+
+def evidence(pr: dict) -> list[str]:
+    text = build_text(pr)
+    files = pr.get("changed_files", [])
+
+    ev = []
+
+    if VULN_ID_RE.search(text):
+        ev.append("explicit_vuln_id")
+
+    if SECURITY_HINT_RE.search(text):
+        ev.append("security_keyword")
+
+    if any(SECURITY_FILE_RE.search(f) for f in files):
+        ev.append("security_file")
+
+    if pr.get("dependabot_security_alert"):
+        ev.append("dependabot_security_alert")
+
+    return ev
+
+
+def classify_security_fix(pr: dict, classifier) -> str:
     """Classify PR as security fix or not using zero-shot classification."""
-    combined_text = f"{title}. {body or ''}"
+    ev = evidence(pr)
 
-    # Strip HTML comments
-    import re
+    if "explicit_vuln_id" in ev:
+        return {"classification": "security", "score": 0.99, "evidence": ev}
 
-    combined_text = re.sub(r"<!--.*?-->", "", combined_text, flags=re.DOTALL)
+    if "dependabot_security_alert" in ev:
+        return {"classification": "security", "score": 0.95, "evidence": ev}
 
-    # Truncate to avoid token limit issues
-    if len(combined_text) > 512:
-        combined_text = combined_text[:512]
+    text = build_text(pr)
 
     result = classifier(
-        combined_text,
-        candidate_labels=SECURITY_RELATED_CLASSIFICATIONS + ["other"],
+        text,
+        candidate_labels=[
+            "fixes or mitigates an exploitable security vulnerability"
+        ],
+        hypothesis_template="This pull request {}.",
+        multi_label=True,
     )
 
-    return result["labels"][0]
+    score = float(result["scores"][0])
+
+    if score >= 0.85:
+        label = "security"
+    elif score <= 0.85 and ev:
+        label = "security"
+    elif score >= 0.75 or ev:
+        label = "needs_review"
+    else:
+        label = "not_security"
+
+    return {
+        "classification": label,
+        "score": score,
+        "evidence": ev,
+    }
 
 
 def collect_prs(
@@ -70,9 +158,7 @@ def collect_prs(
     # if token is None:
     #     token = os.getenv("GITHUB_TOKEN")
 
-    headers = {
-        "Accept": "application/vnd.github.v3+json",
-    }
+    headers = GITHUB_HEADERS
     if token:
         headers["Authorization"] = f"token {token}"
 
@@ -95,8 +181,9 @@ def collect_prs(
             data = response.json()
             for pr in data.get("items", []):
                 classification = classify_security_fix(
-                    pr["title"], pr["body"], classifier
+                    pr, classifier
                 )
+                print(f"PR: {pr['title']} - Classified as: {classification['classification']} (score: {classification['score']:.2f}). Evidence: {classification['evidence']}")
                 all_prs.append(
                     {
                         "author": member,
@@ -106,7 +193,7 @@ def collect_prs(
                         "repository": pr["repository_url"].split("/")[-1],
                         "created_at": pr["created_at"],
                         "state": pr["state"],
-                        "contribution_classification": classification,
+                        "contribution_classification": classification["classification"],
                     }
                 )
         except requests.exceptions.RequestException as e:
@@ -149,26 +236,26 @@ def main():
 
     prs = collect_prs(members, start_date, end_date, classifier)
 
-    security_related_prs = 0
-    summary = {
-        "members": len(members),
-        "total_prs": len(prs),
-    }
-    security_fixes = {classification: 0 for classification in SECURITY_RELATED_CLASSIFICATIONS}
+    # security_related_prs = 0
+    # summary = {
+    #     "members": len(members),
+    #     "total_prs": len(prs),
+    # }
+    # security_fixes = {classification: 0 for classification in SECURITY_RELATED_CLASSIFICATIONS}
     
-    for pr in prs:
-        if pr["contribution_classification"] in SECURITY_RELATED_CLASSIFICATIONS:
-            security_related_prs += 1
-            security_fixes[pr["contribution_classification"]] += 1
-            print(f"{pr['title']} ({pr['url']}) - Classified as: {pr['contribution_classification']}")
+    # for pr in prs:
+    #     if pr["contribution_classification"] in SECURITY_RELATED_CLASSIFICATIONS:
+    #         security_related_prs += 1
+    #         security_fixes[pr["contribution_classification"]] += 1
+    #         print(f"{pr['title']} ({pr['url']}) - Classified as: {pr['contribution_classification']}")
 
-    print(f"\nFound {security_related_prs} security-related PRs\n")
-    print("\033[1mSummary:\033[0m")
-    print(f"Total team members: {summary['members']}")
-    print(f"Total PRs collected: {summary['total_prs']}")
-    print("Security-related PRs by classification:")
-    for classification, count in security_fixes.items():
-        print(f"  {classification}: {count}")
+    # print(f"\nFound {security_related_prs} security-related PRs\n")
+    # print("\033[1mSummary:\033[0m")
+    # print(f"Total team members: {summary['members']}")
+    # print(f"Total PRs collected: {summary['total_prs']}")
+    # print("Security-related PRs by classification:")
+    # for classification, count in security_fixes.items():
+    #     print(f"  {classification}: {count}")
 
 
     if args.output:
