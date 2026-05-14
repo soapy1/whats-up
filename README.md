@@ -36,6 +36,12 @@ $ pixi run collect-prs
 
 This will output a summary of PRs by all the users, including information on how many security and cve related contributions they have made. This will also output the raw data to a file `prs.json`.
 
+Note, you may run into rate limits with the github api. In order to resolve this issue, make a new github token (with only access to public repos). And call the script as such:
+
+```
+$ GITHUB_TOKEN=$GITHUB_TOKEN pixi run collect-prs 
+```
+
 This uses [zero-shot classification](https://huggingface.co/docs/inference-providers/tasks/zero-shot-classification) to determine if a pr is a security or cve related fix based on the pr title and description.
 
 ### Run the frontend

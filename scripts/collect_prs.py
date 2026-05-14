@@ -1,5 +1,6 @@
 import json
 import re
+import os
 import sys
 import argparse
 from datetime import datetime, timedelta
@@ -34,6 +35,15 @@ SECURITY_FILE_RE = re.compile(
 )
 
 
+def get_github_headers() -> dict:
+    """Get GitHub API headers, including authorization if GITHUB_TOKEN is set."""
+    headers = GITHUB_HEADERS.copy()
+    token = os.getenv("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
 def load_team_members(filepath: str = "team.txt") -> list[str]:
     """Load GitHub usernames from team.txt file."""
     try:
@@ -47,10 +57,11 @@ def load_team_members(filepath: str = "team.txt") -> list[str]:
 
 def get_commit_messages(repo_url: str, pr_number: str) -> list[str]:
     """Fetch all commit messages from a PR."""
+    github_headers = get_github_headers()
     try:
         api_url = f"{repo_url}/pulls/{pr_number}/commits"
 
-        response = requests.get(api_url, headers=GITHUB_HEADERS)
+        response = requests.get(api_url, headers=github_headers)
         response.raise_for_status()
 
         commits = response.json()
@@ -275,9 +286,10 @@ def classify_conda_forge_feedstock_fix(pr: dict) -> dict:
     """
     ev = evidence(pr)
 
+    github_headers = get_github_headers()
     try:
         diff_url = pr["pull_request"]["diff_url"]
-        response = requests.get(diff_url, headers=GITHUB_HEADERS)
+        response = requests.get(diff_url, headers=github_headers)
         response.raise_for_status()
         diff = response.text
 
@@ -310,7 +322,6 @@ def collect_prs(
     start_date: datetime,
     end_date: datetime,
     classifier,
-    token: str | None = None,
 ) -> list[dict]:
     """
     Collect public PRs from team members within a given time period.
@@ -324,12 +335,7 @@ def collect_prs(
     Returns:
         List of PR dictionaries
     """
-    # if token is None:
-    #     token = os.getenv("GITHUB_TOKEN")
-
-    headers = GITHUB_HEADERS
-    if token:
-        headers["Authorization"] = f"token {token}"
+    headers = get_github_headers()
 
     all_prs = []
     start_str = start_date.isoformat()
@@ -406,7 +412,7 @@ def main():
 
     # Example: Last N days
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=30)
+    start_date = end_date - timedelta(days=5)
 
     print(f"Collecting PRs from {start_date.date()} to {end_date.date()}")
     print()
