@@ -7,6 +7,9 @@ import requests
 from pathlib import Path
 from transformers import pipeline
 
+SECURITY_RELATED_CLASSIFICATIONS = [
+    "security"
+]
 
 GITHUB_HEADERS = {
     "Accept": "application/vnd.github.v3+json",
@@ -406,26 +409,26 @@ def main():
 
     prs = collect_prs(members, start_date, end_date, classifier)
 
-    # security_related_prs = 0
-    # summary = {
-    #     "members": len(members),
-    #     "total_prs": len(prs),
-    # }
-    # security_fixes = {classification: 0 for classification in SECURITY_RELATED_CLASSIFICATIONS}
+    security_related_prs = 0
+    summary = {
+        "members": len(members),
+        "total_prs": len(prs),
+    }
+    security_fixes = {classification: 0 for classification in SECURITY_RELATED_CLASSIFICATIONS}
     
-    # for pr in prs:
-    #     if pr["contribution_classification"] in SECURITY_RELATED_CLASSIFICATIONS:
-    #         security_related_prs += 1
-    #         security_fixes[pr["contribution_classification"]] += 1
-    #         print(f"{pr['title']} ({pr['url']}) - Classified as: {pr['contribution_classification']}")
+    for pr in prs:
+        if pr["contribution_classification"] in SECURITY_RELATED_CLASSIFICATIONS:
+            security_related_prs += 1
+            security_fixes[pr["contribution_classification"]] += 1
+            print(f"{pr['title']} ({pr['url']}) - Classified as: {pr['contribution_classification']}")
 
-    # print(f"\nFound {security_related_prs} security-related PRs\n")
-    # print("\033[1mSummary:\033[0m")
-    # print(f"Total team members: {summary['members']}")
-    # print(f"Total PRs collected: {summary['total_prs']}")
-    # print("Security-related PRs by classification:")
-    # for classification, count in security_fixes.items():
-    #     print(f"  {classification}: {count}")
+    print(f"\nFound {security_related_prs} security-related PRs\n")
+    print("\033[1mSummary:\033[0m")
+    print(f"Total team members: {summary['members']}")
+    print(f"Total PRs collected: {summary['total_prs']}")
+    print("Security-related PRs by classification:")
+    for classification, count in security_fixes.items():
+        print(f"  {classification}: {count}")
 
 
     if args.output:
