@@ -1,5 +1,5 @@
 import json
-import os
+import re
 import sys
 import argparse
 from datetime import datetime, timedelta
@@ -7,14 +7,35 @@ import requests
 from pathlib import Path
 from transformers import pipeline
 
-
 SECURITY_RELATED_CLASSIFICATIONS = [
-    "security fix",
-    "cve patch",
-    "vulnerability fix",
-    "exploit mitigation",
-    "security enhancement",
+    "security"
 ]
+
+GITHUB_HEADERS = {
+    "Accept": "application/vnd.github.v3+json",
+}
+
+VULN_ID_RE = re.compile(
+    r"\b(CVE-\d{4}-\d{4,7}|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}|CWE-\d+)\b",
+    re.I,
+)
+
+SECURITY_HINT_RE = re.compile(
+    r"\b("
+    r"security|vulnerability|exploit|xss|csrf|ssrf|rce|injection|"
+    r"path traversal|directory traversal|auth bypass|privilege escalation|"
+    r"deserialization|sandbox escape|secret leak|token leak|sanitize|"
+    r"permission check|access control|cve|ghsa|cwe"
+    r")\b",
+    re.I,
+)
+
+SECURITY_FILE_RE = re.compile(
+    r"(auth|oauth|jwt|session|permission|rbac|acl|crypto|secret|token|"
+    r"password|sanitize|csrf|xss|ssrf|parser|sandbox|policy)",
+    re.I,
+)
+
 
 def load_team_members(filepath: str = "team.txt") -> list[str]:
     """Load GitHub usernames from team.txt file."""
@@ -27,25 +48,262 @@ def load_team_members(filepath: str = "team.txt") -> list[str]:
         sys.exit(1)
 
 
-def classify_security_fix(title: str, body: str | None, classifier) -> str:
+def get_commit_messages(repo_url: str, pr_number: str) -> list[str]:
+    """Fetch all commit messages from a PR."""
+    try:
+        api_url = f"{repo_url}/pulls/{pr_number}/commits"
+        
+        response = requests.get(api_url, headers=GITHUB_HEADERS)
+        response.raise_for_status()
+        
+        commits = response.json()
+        messages = [commit.get("commit", {}).get("message", "") for commit in commits]
+        return messages
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching commits for {repo_url}/pulls/{pr_number}: {e}")
+        return []
+
+
+def build_text(pr: dict) -> str:
+    return f"""
+PR_TITLE: {pr.get("title", "")}
+
+PR_BODY:
+{pr.get("body", "")}
+
+PR_LABELS:
+{" ".join([label.get("name", "") for label in pr.get("labels", [])])}
+
+COMMIT_MESSAGES:
+{" ".join(get_commit_messages(pr["repository_url"], pr["number"]))}
+""".strip()
+
+
+def evidence(pr: dict) -> list[str]:
+    text = build_text(pr)
+    files = pr.get("changed_files", [])
+
+    ev = []
+
+    if VULN_ID_RE.search(text):
+        ev.append("explicit_vuln_id")
+
+    if SECURITY_HINT_RE.search(text):
+        ev.append("security_keyword")
+
+    if any(SECURITY_FILE_RE.search(f) for f in files):
+        ev.append("security_file")
+
+    if pr.get("dependabot_security_alert"):
+        ev.append("dependabot_security_alert")
+
+    return ev
+
+
+def classify_security_fix(pr: dict, classifier) -> str:
     """Classify PR as security fix or not using zero-shot classification."""
-    combined_text = f"{title}. {body or ''}"
+    ev = evidence(pr)
 
-    # Strip HTML comments
-    import re
+    if "explicit_vuln_id" in ev:
+        return {"classification": "security", "score": 0.99, "evidence": ev}
 
-    combined_text = re.sub(r"<!--.*?-->", "", combined_text, flags=re.DOTALL)
+    if "dependabot_security_alert" in ev:
+        return {"classification": "security", "score": 0.95, "evidence": ev}
 
-    # Truncate to avoid token limit issues
-    if len(combined_text) > 512:
-        combined_text = combined_text[:512]
+    text = build_text(pr)
 
     result = classifier(
-        combined_text,
-        candidate_labels=SECURITY_RELATED_CLASSIFICATIONS + ["other"],
+        text,
+        candidate_labels=[
+            "fixes or mitigates an exploitable security vulnerability"
+        ],
+        hypothesis_template="This pull request {}.",
+        multi_label=True,
     )
 
-    return result["labels"][0]
+    score = float(result["scores"][0])
+
+    if score >= 0.85:
+        label = "security"
+    elif score <= 0.85 and ev:
+        label = "security"
+    elif score >= 0.75 or ev:
+        label = "needs_review"
+    else:
+        label = "not_security"
+
+    return {
+        "classification": label,
+        "score": score,
+        "evidence": ev,
+    }
+
+def extract_versions_from_diff(diff: str) -> tuple[str | None, str | None]:
+    """
+    Extract old and new version numbers from a diff.
+    Returns (old_version, new_version) or (None, None) if not found.
+    """
+    # Pattern to detect version changes in diff
+    # Looks for lines like: -  version: 1.2.3
+    #                      +  version: 1.2.4
+    version_pattern = re.compile(r'version\s*[:=]\s*"([\d\.]+)"', re.MULTILINE)
+    
+    matches = version_pattern.findall(diff)
+    if len(matches) >= 2:
+        return (matches[0], matches[1])
+    
+    return (None, None)
+
+
+def has_version_update_in_diff(diff: str) -> bool:
+    """
+    Check if the diff contains a package version update.
+    Looks for version changes in conda-forge feedstock files (meta.yaml, recipe.yaml, etc).
+    """
+    old_version, new_version = extract_versions_from_diff(diff)
+    
+    if old_version and new_version:
+        return True
+    
+    # Also check for common conda-forge version reference patterns
+    sha_pattern = re.compile(r'^[\+\-]\s+sha256\s*:\s*[a-f0-9]{64}', re.MULTILINE)
+    if sha_pattern.search(diff):
+        return True
+    
+    return False
+
+
+def query_osv_for_cves(package_name: str, old_version: str, new_version: str | None = None) -> tuple[list[str], list[str]]:
+    """
+    Query OSV.dev API to find CVEs for a specific package version.
+    Returns a tuple of (vulnerable_cves, fixed_cves).
+    
+    Args:
+        package_name: Name of the package
+        old_version: The old/current version to check for vulnerabilities
+        new_version: The new version to check if vulnerabilities are fixed (optional)
+    
+    Returns:
+        list of fixed cves as CVE/GHSA IDs
+    """
+    vulnerable_cves = []
+    fixed_cves = []
+    
+    try:
+        osv_url = "https://api.osv.dev/v1/query"
+        payload = {
+            "version": old_version,
+            "package": {
+                "name": package_name,
+                "ecosystem": "PyPI"  # Default to PyPI, could be extended for other ecosystems
+            }
+        }
+        
+        response = requests.post(osv_url, json=payload, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        vulns = data.get("vulns", [])
+
+        for vuln in vulns:
+            vuln_id = vuln.get("id", "")
+            if not vuln_id:
+                continue
+            
+            vulnerable_cves.append(vuln_id)
+            
+            # If new_version is provided, check if this vulnerability is fixed
+            if new_version:
+                affected_versions = vuln.get("affected", [])
+                is_fixed = False
+                
+                for affected in affected_versions:
+                    # Check if new_version is outside the affected range (i.e., fixed)
+                    if affected.get("package", {}).get("name") == package_name:
+                        ranges = affected.get("ranges", [])
+                        for range_info in ranges:
+                            events = range_info.get("events", [])
+                            for event in events:
+                                # Check if new_version is >= fixed version
+                                if "fixed" in event:
+                                    fixed_version = event.get("fixed", "")
+                                    # Simple version comparison (assumes semantic versioning)
+                                    if _version_gte(new_version, fixed_version):
+                                        is_fixed = True
+                                        break
+                            if is_fixed:
+                                break
+                    if is_fixed:
+                        break
+                
+                if is_fixed:
+                    fixed_cves.append(vuln_id)
+                    vulnerable_cves.remove(vuln_id)
+        
+        return fixed_cves
+    except requests.exceptions.RequestException as e:
+        print(f"Error querying OSV.dev for {package_name}@{old_version}: {e}")
+        return ([], [])
+
+
+def _version_gte(version1: str, version2: str) -> bool:
+    """
+    Check if version1 >= version2 using semantic versioning comparison.
+    Simple comparison that works for most cases.
+    """
+    try:
+        from packaging import version
+        return version.parse(version1) >= version.parse(version2)
+    except:
+        # Fallback to simple string comparison if packaging not available
+        v1_parts = [int(x) for x in version1.split(".")]
+        v2_parts = [int(x) for x in version2.split(".")]
+        # Pad with zeros
+        max_len = max(len(v1_parts), len(v2_parts))
+        v1_parts += [0] * (max_len - len(v1_parts))
+        v2_parts += [0] * (max_len - len(v2_parts))
+        return v1_parts >= v2_parts
+
+
+def classify_conda_forge_feedstock_fix(pr: dict) -> dict:
+    """
+    Classify PR as conda-forge feedstock pr as related to a security fix.
+    
+    A conda-forge feedstock PR is considered related to a security fix if:
+    * it explicitly mentions a CVE or GHSA ID in the title, body, or labels
+    * in diff includes a version number bump for a package that has a known security 
+      vulnerability listed on osv.dev
+    """
+    ev = evidence(pr)
+
+    try:
+        diff_url = pr["pull_request"]["diff_url"]
+        response = requests.get(diff_url, headers=GITHUB_HEADERS)
+        response.raise_for_status()
+        diff = response.text
+        
+        if has_version_update_in_diff(diff):
+            # Extract package name from repo name (e.g., "jinja2-feedstock" -> "jinja2")
+            repo_name = pr["repository_url"].split("/")[-1]
+            package_name = repo_name.replace("-feedstock", "").replace("-", "_")
+            
+            # Extract old and new versions
+            old_version, new_version = extract_versions_from_diff(diff)
+            
+            if old_version:
+                # Query OSV.dev for vulnerabilities in the old version and check if fixed in new version
+                fixed_cves = query_osv_for_cves(package_name, old_version, new_version)
+                if fixed_cves:
+                    ev.append(f"cves_fixed:{','.join(fixed_cves)}")
+                    return {"classification": "security", "score": 0.99, "evidence": ev}
+            
+    except (requests.exceptions.RequestException, KeyError) as e:
+        print(f"Error processing PR diff: {e}")
+
+    if "explicit_vuln_id" in ev or "security_keyword" in ev:
+        return {"classification": "security", "score": 0.95, "evidence": ev}
+
+    return {"classification": "not_security", "score": 0.01, "evidence": ev}
 
 
 def collect_prs(
@@ -70,9 +328,7 @@ def collect_prs(
     # if token is None:
     #     token = os.getenv("GITHUB_TOKEN")
 
-    headers = {
-        "Accept": "application/vnd.github.v3+json",
-    }
+    headers = GITHUB_HEADERS
     if token:
         headers["Authorization"] = f"token {token}"
 
@@ -94,9 +350,13 @@ def collect_prs(
 
             data = response.json()
             for pr in data.get("items", []):
-                classification = classify_security_fix(
-                    pr["title"], pr["body"], classifier
-                )
+                if "conda-forge/" in pr["repository_url"] and "-feedstock" in pr["repository_url"]:
+                    classification = classify_conda_forge_feedstock_fix(pr)
+                else:
+                    classification = classify_security_fix(
+                        pr, classifier
+                    )
+                print(f"PR: {pr['title']} - Classified as: {classification['classification']} (score: {classification['score']:.2f}). Evidence: {classification['evidence']}")
                 all_prs.append(
                     {
                         "author": member,
@@ -106,7 +366,7 @@ def collect_prs(
                         "repository": pr["repository_url"].split("/")[-1],
                         "created_at": pr["created_at"],
                         "state": pr["state"],
-                        "contribution_classification": classification,
+                        "contribution_classification": classification["classification"],
                     }
                 )
         except requests.exceptions.RequestException as e:
