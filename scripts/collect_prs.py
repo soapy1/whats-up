@@ -4,12 +4,9 @@ import sys
 import argparse
 from datetime import datetime, timedelta
 import requests
-from pathlib import Path
 from transformers import pipeline
 
-SECURITY_RELATED_CLASSIFICATIONS = [
-    "security"
-]
+SECURITY_RELATED_CLASSIFICATIONS = ["security"]
 
 GITHUB_HEADERS = {
     "Accept": "application/vnd.github.v3+json",
@@ -52,10 +49,10 @@ def get_commit_messages(repo_url: str, pr_number: str) -> list[str]:
     """Fetch all commit messages from a PR."""
     try:
         api_url = f"{repo_url}/pulls/{pr_number}/commits"
-        
+
         response = requests.get(api_url, headers=GITHUB_HEADERS)
         response.raise_for_status()
-        
+
         commits = response.json()
         messages = [commit.get("commit", {}).get("message", "") for commit in commits]
         return messages
@@ -114,9 +111,7 @@ def classify_security_fix(pr: dict, classifier) -> str:
 
     result = classifier(
         text,
-        candidate_labels=[
-            "fixes or mitigates an exploitable security vulnerability"
-        ],
+        candidate_labels=["fixes or mitigates an exploitable security vulnerability"],
         hypothesis_template="This pull request {}.",
         multi_label=True,
     )
@@ -138,6 +133,7 @@ def classify_security_fix(pr: dict, classifier) -> str:
         "evidence": ev,
     }
 
+
 def extract_versions_from_diff(diff: str) -> tuple[str | None, str | None]:
     """
     Extract old and new version numbers from a diff.
@@ -147,11 +143,11 @@ def extract_versions_from_diff(diff: str) -> tuple[str | None, str | None]:
     # Looks for lines like: -  version: 1.2.3
     #                      +  version: 1.2.4
     version_pattern = re.compile(r'version\s*[:=]\s*"([\d\.]+)"', re.MULTILINE)
-    
+
     matches = version_pattern.findall(diff)
     if len(matches) >= 2:
         return (matches[0], matches[1])
-    
+
     return (None, None)
 
 
@@ -161,47 +157,49 @@ def has_version_update_in_diff(diff: str) -> bool:
     Looks for version changes in conda-forge feedstock files (meta.yaml, recipe.yaml, etc).
     """
     old_version, new_version = extract_versions_from_diff(diff)
-    
+
     if old_version and new_version:
         return True
-    
+
     # Also check for common conda-forge version reference patterns
-    sha_pattern = re.compile(r'^[\+\-]\s+sha256\s*:\s*[a-f0-9]{64}', re.MULTILINE)
+    sha_pattern = re.compile(r"^[\+\-]\s+sha256\s*:\s*[a-f0-9]{64}", re.MULTILINE)
     if sha_pattern.search(diff):
         return True
-    
+
     return False
 
 
-def query_osv_for_cves(package_name: str, old_version: str, new_version: str | None = None) -> tuple[list[str], list[str]]:
+def query_osv_for_cves(
+    package_name: str, old_version: str, new_version: str | None = None
+) -> tuple[list[str], list[str]]:
     """
     Query OSV.dev API to find CVEs for a specific package version.
     Returns a tuple of (vulnerable_cves, fixed_cves).
-    
+
     Args:
         package_name: Name of the package
         old_version: The old/current version to check for vulnerabilities
         new_version: The new version to check if vulnerabilities are fixed (optional)
-    
+
     Returns:
         list of fixed cves as CVE/GHSA IDs
     """
     vulnerable_cves = []
     fixed_cves = []
-    
+
     try:
         osv_url = "https://api.osv.dev/v1/query"
         payload = {
             "version": old_version,
             "package": {
                 "name": package_name,
-                "ecosystem": "PyPI"  # Default to PyPI, could be extended for other ecosystems
-            }
+                "ecosystem": "PyPI",  # Default to PyPI, could be extended for other ecosystems
+            },
         }
-        
+
         response = requests.post(osv_url, json=payload, timeout=10)
         response.raise_for_status()
-        
+
         data = response.json()
         vulns = data.get("vulns", [])
 
@@ -209,14 +207,14 @@ def query_osv_for_cves(package_name: str, old_version: str, new_version: str | N
             vuln_id = vuln.get("id", "")
             if not vuln_id:
                 continue
-            
+
             vulnerable_cves.append(vuln_id)
-            
+
             # If new_version is provided, check if this vulnerability is fixed
             if new_version:
                 affected_versions = vuln.get("affected", [])
                 is_fixed = False
-                
+
                 for affected in affected_versions:
                     # Check if new_version is outside the affected range (i.e., fixed)
                     if affected.get("package", {}).get("name") == package_name:
@@ -235,11 +233,11 @@ def query_osv_for_cves(package_name: str, old_version: str, new_version: str | N
                                 break
                     if is_fixed:
                         break
-                
+
                 if is_fixed:
                     fixed_cves.append(vuln_id)
                     vulnerable_cves.remove(vuln_id)
-        
+
         return fixed_cves
     except requests.exceptions.RequestException as e:
         print(f"Error querying OSV.dev for {package_name}@{old_version}: {e}")
@@ -253,8 +251,9 @@ def _version_gte(version1: str, version2: str) -> bool:
     """
     try:
         from packaging import version
+
         return version.parse(version1) >= version.parse(version2)
-    except:
+    except version.InvalidVersion:
         # Fallback to simple string comparison if packaging not available
         v1_parts = [int(x) for x in version1.split(".")]
         v2_parts = [int(x) for x in version2.split(".")]
@@ -268,10 +267,10 @@ def _version_gte(version1: str, version2: str) -> bool:
 def classify_conda_forge_feedstock_fix(pr: dict) -> dict:
     """
     Classify PR as conda-forge feedstock pr as related to a security fix.
-    
+
     A conda-forge feedstock PR is considered related to a security fix if:
     * it explicitly mentions a CVE or GHSA ID in the title, body, or labels
-    * in diff includes a version number bump for a package that has a known security 
+    * in diff includes a version number bump for a package that has a known security
       vulnerability listed on osv.dev
     """
     ev = evidence(pr)
@@ -281,22 +280,22 @@ def classify_conda_forge_feedstock_fix(pr: dict) -> dict:
         response = requests.get(diff_url, headers=GITHUB_HEADERS)
         response.raise_for_status()
         diff = response.text
-        
+
         if has_version_update_in_diff(diff):
             # Extract package name from repo name (e.g., "jinja2-feedstock" -> "jinja2")
             repo_name = pr["repository_url"].split("/")[-1]
             package_name = repo_name.replace("-feedstock", "").replace("-", "_")
-            
+
             # Extract old and new versions
             old_version, new_version = extract_versions_from_diff(diff)
-            
+
             if old_version:
                 # Query OSV.dev for vulnerabilities in the old version and check if fixed in new version
                 fixed_cves = query_osv_for_cves(package_name, old_version, new_version)
                 if fixed_cves:
                     ev.append(f"cves_fixed:{','.join(fixed_cves)}")
                     return {"classification": "security", "score": 0.99, "evidence": ev}
-            
+
     except (requests.exceptions.RequestException, KeyError) as e:
         print(f"Error processing PR diff: {e}")
 
@@ -354,14 +353,17 @@ def collect_prs(
                     continue  # Skip PRs in openteams-ai org
                 if "quansight/" in pr["repository_url"]:
                     continue  # Skip PRs in quansight org
-                
-                if "conda-forge/" in pr["repository_url"] and "-feedstock" in pr["repository_url"]:
+
+                if (
+                    "conda-forge/" in pr["repository_url"]
+                    and "-feedstock" in pr["repository_url"]
+                ):
                     classification = classify_conda_forge_feedstock_fix(pr)
                 else:
-                    classification = classify_security_fix(
-                        pr, classifier
-                    )
-                print(f"PR: {pr['title']} - Classified as: {classification['classification']} (score: {classification['score']:.2f}). Evidence: {classification['evidence']}")
+                    classification = classify_security_fix(pr, classifier)
+                print(
+                    f"PR: {pr['title']} - Classified as: {classification['classification']} (score: {classification['score']:.2f}). Evidence: {classification['evidence']}"
+                )
                 all_prs.append(
                     {
                         "author": member,
@@ -419,13 +421,17 @@ def main():
         "members": len(members),
         "total_prs": len(prs),
     }
-    security_fixes = {classification: 0 for classification in SECURITY_RELATED_CLASSIFICATIONS}
-    
+    security_fixes = {
+        classification: 0 for classification in SECURITY_RELATED_CLASSIFICATIONS
+    }
+
     for pr in prs:
         if pr["contribution_classification"] in SECURITY_RELATED_CLASSIFICATIONS:
             security_related_prs += 1
             security_fixes[pr["contribution_classification"]] += 1
-            print(f"{pr['title']} ({pr['url']}) - Classified as: {pr['contribution_classification']}")
+            print(
+                f"{pr['title']} ({pr['url']}) - Classified as: {pr['contribution_classification']}"
+            )
 
     print(f"\nFound {security_related_prs} security-related PRs\n")
     print("\033[1mSummary:\033[0m")
@@ -434,7 +440,6 @@ def main():
     print("Security-related PRs by classification:")
     for classification, count in security_fixes.items():
         print(f"  {classification}: {count}")
-
 
     if args.output:
         with open(args.output, "w") as f:
