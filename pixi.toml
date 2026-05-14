@@ -6,7 +6,7 @@ platforms = ["linux-64", "osx-arm64", "win-64"]
 version = "0.1.0"
 
 [tasks]
-find-my-team = { description = "Populate the team.txt list with github usernames associated with OpenTeams", cmd = ["gh", "api", "--paginate", "/orgs/openteams-ai/members", "--jq", ".[].login", ">", "team.txt"] }
+find-my-team = { description = "Populate the team.txt list with github usernames associated with OpenTeams", cmd = ["bash", "scripts/collect_team.sh"] }
 collect-prs = { description = "Collect PRs from the team members and save to a JSON file", cmd = ["python", "scripts/collect_prs.py", "--team-file", "team.txt", "--output", "prs.json"] }
 
 [dependencies]
