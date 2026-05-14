@@ -350,6 +350,11 @@ def collect_prs(
 
             data = response.json()
             for pr in data.get("items", []):
+                if "openteams-ai/" in pr["repository_url"]:
+                    continue  # Skip PRs in openteams-ai org
+                if "quansight/" in pr["repository_url"]:
+                    continue  # Skip PRs in quansight org
+                
                 if "conda-forge/" in pr["repository_url"] and "-feedstock" in pr["repository_url"]:
                     classification = classify_conda_forge_feedstock_fix(pr)
                 else:
