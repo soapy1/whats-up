@@ -227,65 +227,92 @@ body {
 }
 
 /* Security PRs Table */
-.security-prs {
+.security-prs-table {
   background: white;
   padding: 2rem;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-bottom: 3rem;
 }
 
-.security-prs h2 {
+.security-prs-table h2 {
   font-size: 1.8rem;
   margin-bottom: 1.5rem;
   color: #333;
 }
 
-.table-wrapper {
+.table-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.table-controls label {
+  font-weight: 600;
+  color: #333;
+}
+
+.table-controls select {
+  padding: 0.5rem 0.75rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  background-color: white;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.table-controls select:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.table-responsive {
   overflow-x: auto;
 }
 
-.prs-table {
+.security-prs-table table {
   width: 100%;
   border-collapse: collapse;
   margin-top: 1rem;
 }
 
-.prs-table thead {
+.security-prs-table thead {
   background-color: #667eea;
   color: white;
 }
 
-.prs-table th {
+.security-prs-table th {
   padding: 1rem;
   text-align: left;
   font-weight: 600;
-  cursor: pointer;
-  user-select: none;
+  font-size: 0.95rem;
 }
 
-.prs-table th:hover {
-  background-color: #5568d3;
-}
-
-.prs-table td {
+.security-prs-table td {
   padding: 1rem;
   border-bottom: 1px solid #e0e0e0;
+  color: #333;
 }
 
-.prs-table tbody tr:hover {
+.security-prs-table tbody tr:hover {
   background-color: #f9f9f9;
 }
 
-.pr-title {
+.security-prs-table a {
+  color: #667eea;
+  text-decoration: none;
   font-weight: 500;
-  color: #333;
-  max-width: 400px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
 }
 
-.badge {
+.security-prs-table a:hover {
+  text-decoration: underline;
+}
+
+.status-badge {
   display: inline-block;
   padding: 0.4rem 0.8rem;
   border-radius: 20px;
@@ -294,39 +321,22 @@ body {
   white-space: nowrap;
 }
 
-.badge-security-fix {
+.status-badge.open {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+}
+
+.status-badge.closed {
   background-color: #ffebee;
   color: #c62828;
 }
 
-.badge-cve-patch {
-  background-color: #ffe0b2;
-  color: #e65100;
-}
-
-.badge-vulnerability-fix {
-  background-color: #f3e5f5;
-  color: #6a1b9a;
-}
-
-.badge-exploit-mitigation {
-  background-color: #e0f2f1;
-  color: #00695c;
-}
-
-.badge-security-enhancement {
-  background-color: #e3f2fd;
-  color: #01579b;
-}
-
-.prs-table a {
-  color: #667eea;
-  text-decoration: none;
-  font-weight: 500;
-}
-
-.prs-table a:hover {
-  text-decoration: underline;
+.table-footer {
+  margin-top: 1.5rem;
+  text-align: right;
+  color: #666;
+  font-size: 0.95rem;
+  font-style: italic;
 }
 
 /* Responsive */

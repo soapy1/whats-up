@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 import Statistics from './components/Statistics';
-import ContributionSummary from './components/ContributionSummary';
 import SecurityPRsTable from './components/SecurityPRsTable';
 import DateRangeFilter from './components/DateRangeFilter';
 
@@ -62,7 +61,7 @@ function App() {
     <div className="App">
       <header className="app-header">
         <h1>Team Contributions Dashboard</h1>
-        <p>Track open source contributions made by team members</p>
+        <p>Track open source security contributions made by team members</p>
       </header>
       
       <main className="container">
@@ -73,7 +72,6 @@ function App() {
           onEndDateChange={setEndDate}
         />
         <Statistics prsData={filteredPRs} />
-        <ContributionSummary prsData={filteredPRs} />
         <SecurityPRsTable prsData={filteredPRs} />
       </main>
     </div>
