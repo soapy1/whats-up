@@ -43,7 +43,6 @@ function SecurityPRsTable({ prsData }) {
               <th>Title</th>
               <th>Repository</th>
               <th>Date</th>
-              <th>Status</th>
             </tr>
           </thead>
           <tbody>
@@ -56,11 +55,6 @@ function SecurityPRsTable({ prsData }) {
                 </td>
                 <td>{pr.repository}</td>
                 <td>{formatDate(pr.created_at)}</td>
-                <td>
-                  <span className={`status-badge ${pr.state}`}>
-                    {pr.state}
-                  </span>
-                </td>
               </tr>
             ))}
           </tbody>
