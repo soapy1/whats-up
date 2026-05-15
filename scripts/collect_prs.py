@@ -407,7 +407,7 @@ def main():
 
     # Initialize zero-shot classifier
     print("Loading zero-shot classification model...")
-    classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+    classifier = pipeline("zero-shot-classification", model="MoritzLaurer/ModernBERT-large-zeroshot-v2.0")
     print("Model loaded!\n")
 
     # Example: Last N days
