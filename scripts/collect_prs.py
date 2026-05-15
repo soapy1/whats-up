@@ -129,14 +129,14 @@ def classify_security_fix(pr: dict, classifier) -> str:
 
     score = float(result["scores"][0])
 
-    if score >= 0.85:
+    if score >= 0.95:
         label = "security"
     elif score <= 0.85 and ev:
         label = "security"
-    elif score >= 0.75 or ev:
-        label = "needs_review"
+    elif score <= 0.70:
+        label = "not_secuirity"
     else:
-        label = "not_security"
+        label = "needs_review"
 
     return {
         "classification": label,
@@ -376,7 +376,7 @@ def collect_prs(
                         "title": pr["title"],
                         "body": pr["body"],
                         "url": pr["html_url"],
-                        "repository": pr["repository_url"].split("/")[-1],
+                        "repository": f"{pr["repository_url"].split("/")[-2]}/{pr["repository_url"].split("/")[-1]}",
                         "created_at": pr["created_at"],
                         "state": pr["state"],
                         "contribution_classification": classification["classification"],
@@ -407,7 +407,7 @@ def main():
 
     # Initialize zero-shot classifier
     print("Loading zero-shot classification model...")
-    classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+    classifier = pipeline("zero-shot-classification", model="MoritzLaurer/ModernBERT-large-zeroshot-v2.0")
     print("Model loaded!\n")
 
     # Example: Last N days
