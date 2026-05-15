@@ -376,7 +376,7 @@ def collect_prs(
                         "title": pr["title"],
                         "body": pr["body"],
                         "url": pr["html_url"],
-                        "repository": pr["repository_url"].split("/")[-1],
+                        "repository": f"{pr["repository_url"].split("/")[-2]}/{pr["repository_url"].split("/")[-1]}",
                         "created_at": pr["created_at"],
                         "state": pr["state"],
                         "contribution_classification": classification["classification"],
