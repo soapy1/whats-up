@@ -344,17 +344,25 @@ def collect_prs(
     for member in members:
         print(f"Fetching PRs for {member}...")
 
-        # Search for PRs authored by this user
-        query = f"author:{member} is:pr created:{start_str}..{end_str}"
         url = "https://api.github.com/search/issues"
-        params = {"q": query, "sort": "created", "order": "desc", "per_page": 100}
+        queries = [
+            f"author:{member} is:pr is:open created:{start_str}..{end_str}",
+            f"author:{member} is:pr is:merged created:{start_str}..{end_str}",
+        ]
 
         try:
-            response = requests.get(url, headers=headers, params=params)
-            response.raise_for_status()
+            items = []
+            for query in queries:
+                next_url = url
+                next_params = {"q": query, "sort": "created", "order": "desc", "per_page": 100}
+                while next_url:
+                    response = requests.get(next_url, headers=headers, params=next_params)
+                    response.raise_for_status()
+                    items.extend(response.json().get("items", []))
+                    next_params = None
+                    next_url = response.links.get("next", {}).get("url")
 
-            data = response.json()
-            for pr in data.get("items", []):
+            for pr in items:
                 if "openteams-ai/" in pr["repository_url"]:
                     continue  # Skip PRs in openteams-ai org
                 if "quansight/" in pr["repository_url"]:
