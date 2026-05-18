@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 import Statistics from './components/Statistics';
+import TopSecurityPackages from './components/TopSecurityPackages';
 import SecurityPRsTable from './components/SecurityPRsTable';
 import DateRangeFilter from './components/DateRangeFilter';
 
@@ -72,6 +73,7 @@ function App() {
           onEndDateChange={setEndDate}
         />
         <Statistics prsData={filteredPRs} />
+        <TopSecurityPackages prsData={filteredPRs} />
         <SecurityPRsTable prsData={filteredPRs} />
       </main>
     </div>
