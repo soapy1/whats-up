@@ -21,3 +21,6 @@ npx = "*"
 
 [environments]
 frontend = ["frontend"]
+
+[pypi-dependencies]
+firebase-admin = ">=7.4.0, <8"
