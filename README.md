@@ -44,6 +44,14 @@ $ GITHUB_TOKEN=$GITHUB_TOKEN pixi run collect-prs
 
 This uses [zero-shot classification](https://huggingface.co/docs/inference-providers/tasks/zero-shot-classification) to determine if a pr is a security or cve related fix based on the pr title and description.
 
+##### Upload to firestore
+
+To upload the pr data to a firestore db:
+ ```
+gcloud auth application-default login
+FIREBASE_DATABASE_ID=whatsup FIREBASE_PROJECT_ID=your-project-id GITHUB_TOKEN=$GITHUB_TOKEN pixi run collect-prs --upload
+ ```
+
 ### Run the frontend
 
 Once you have run the scripts to create a prs.json, you can also view the data in a more friendly, web-based way.

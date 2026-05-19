@@ -6,6 +6,9 @@ import argparse
 from datetime import datetime, timedelta
 import requests
 from transformers import pipeline
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import firestore
 
 SECURITY_RELATED_CLASSIFICATIONS = ["security"]
 
@@ -410,6 +413,11 @@ def main():
         "--output",
         help="Path to output file for JSON results",
     )
+    parser.add_argument(
+        "--upload",
+        action='store_true',
+        help="Upload to firestore database",
+    )
 
     args = parser.parse_args()
 
@@ -459,6 +467,23 @@ def main():
         with open(args.output, "w") as f:
             json.dump(prs, f, indent=2)
 
+    if args.upload:
+        project_id = os.getenv("FIREBASE_PROJECT_ID")
+        database_id = os.getenv("FIREBASE_DATABASE_ID")
+        if not project_id:
+            print("Error: FIREBASE_PROJECT_ID environment variable is not set")
+            sys.exit(1)
+        if not database_id:
+            print("Error: FIREBASE_DATABASE_ID environment variable is not set")
+            sys.exit(1)
+        cred = credentials.ApplicationDefault()
+        firebase_admin.initialize_app(cred, {"projectId": project_id})
+        db = firestore.client(database_id=database_id)
+        collection = db.collection("prs")
+        for pr in prs:
+            doc_id = pr["repository"].replace("/", ".") + "_" + pr["url"].split("/")[-1]
+            collection.document(doc_id).set(pr)
+        print(f"Uploaded {len(prs)} PRs to Firestore")
 
 if __name__ == "__main__":
     main()
